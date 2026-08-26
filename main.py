@@ -40,6 +40,10 @@ async def callback(request: Request):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return "OK"
 
+@app.post("/")
+async def callback_root(request: Request):
+    return await callback(request)
+
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_text = event.message.text
