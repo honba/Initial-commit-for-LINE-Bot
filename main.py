@@ -47,17 +47,25 @@ async def callback_root(request: Request):
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     user_text = event.message.text
-    response = model.generate_content(user_text)
-    translated_text = response.text.strip()
+    print(f"收到使用者訊息: {user_text}")  # 印出收到訊息
 
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message_with_http_info(
-            ReplyMessageRequest(
-                reply_token=event.reply_token,
-                messages=[TextMessage(text=translated_text)]
+    try:
+        # 呼叫 Gemini
+        response = model.generate_content(user_text)
+        translated_text = response.text.strip()
+        print(f"Gemini 翻譯結果: {translated_text}")
+
+        # 回傳 LINE 訊息
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            line_bot_api.reply_message_with_http_info(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=translated_text)]
+                )
             )
-        )
+    except Exception as e:
+        print(f"發生錯誤 (Error Detail): {str(e)}")  # 將詳細錯誤印在 Render Log
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
