@@ -24,10 +24,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 PREF_FILE = "user_language_pref.json"
 
 # ---------------------------------------------------------------------------
-# 2. JSON 檔案讀寫機制（記錄對話偏好語言）
+# 2. JSON 檔案讀寫機制（記錄對話偏好語言與開關狀態）
+# 結構：{ "source_id": { "lang": "日文", "active": True } }
 # ---------------------------------------------------------------------------
 def load_preferences() -> dict:
-    """伺服器啟動時讀取本地 JSON 偏好設定檔"""
     if os.path.exists(PREF_FILE):
         try:
             with open(PREF_FILE, "r", encoding="utf-8") as f:
@@ -38,7 +38,6 @@ def load_preferences() -> dict:
     return {}
 
 def save_preferences(data: dict):
-    """當偏好語言改變時，更新並寫入 JSON 檔案"""
     try:
         with open(PREF_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
@@ -78,12 +77,10 @@ translate_model = genai.GenerativeModel(
 # ---------------------------------------------------------------------------
 @app.get("/")
 def health_check():
-    """供 UptimeRobot Ping 的 Health Check 端點，維持防休眠"""
     return {"status": "ok", "message": "LINE Translator Bot is running."}
 
 @app.post("/callback")
 async def callback(request: Request):
-    """LINE Webhook 接收端點"""
     signature = request.headers.get("X-Line-Signature", "")
     body = (await request.body()).decode("utf-8")
     try:
@@ -94,43 +91,71 @@ async def callback(request: Request):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    """處理 LINE 文字訊息的主要邏輯"""
     user_text = event.message.text.strip()
-    
-    # 判斷訊息來源 ID（優先取得群組 ID，否則取得個人 User ID）
     source_id = getattr(event.source, 'group_id', None) or event.source.user_id
 
-    try:
-        # Step 1: 辨識輸入訊息的語言
-        detect_res = detect_model.generate_content(user_text)
-        detected_lang = detect_res.text.strip()
-        
-        # Step 2: 根據語言判定翻譯邏輯與記憶更新
-        if detected_lang != "中文":
-            # 收到外文：更新該對話的偏好外語，並翻譯成繁體中文
-            if user_language_pref.get(source_id) != detected_lang:
-                user_language_pref[source_id] = detected_lang
-                save_preferences(user_language_pref)
-            
-            prompt = f"請將以下文字翻譯成【台灣常用繁體中文】：\n{user_text}"
-        else:
-            # 收到中文：讀取偏好外語（若從未紀錄過，預設為「英文」）
-            target_lang = user_language_pref.get(source_id, "英文")
-            prompt = f"請將以下文字翻譯成【{target_lang}】：\n{user_text}"
+    # 取得當前對話的設定（若無設定則預設啟用，偏好語言預設英文）
+    session = user_language_pref.get(source_id, {"lang": "英文", "active": True})
 
-        # Step 3: 呼叫 Gemini 進行翻譯
-        response = translate_model.generate_content(prompt)
-        translated_text = response.text.strip()
-
-        # Step 4: 回傳翻譯結果給 LINE
+    # 輔助函式：發送訊息
+    def reply(text):
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             line_bot_api.reply_message_with_http_info(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=[TextMessage(text=translated_text)]
+                    messages=[TextMessage(text=text)]
                 )
             )
+
+    # -----------------------------------------------------------------------
+    # 指令處理：開關控制
+    # -----------------------------------------------------------------------
+    if user_text in ["關閉翻譯", "停止翻譯", "off", "OFF"]:
+        session["active"] = False
+        user_language_pref[source_id] = session
+        save_preferences(user_language_pref)
+        reply("🔴 翻譯功能已關閉。需要時請輸入「開啟翻譯」。")
+        return
+
+    if user_text in ["開啟翻譯", "啟動翻譯", "on", "ON"]:
+        session["active"] = True
+        user_language_pref[source_id] = session
+        save_preferences(user_language_pref)
+        reply(f"🟢 翻譯功能已開啟。（目前目標外語：{session.get('lang', '英文')}）")
+        return
+
+    # 若開關為關閉狀態，直接跳出不處理（不回應任何訊息）
+    if not session.get("active", True):
+        return
+
+    # -----------------------------------------------------------------------
+    # 翻譯處理邏輯
+    # -----------------------------------------------------------------------
+    try:
+        detect_res = detect_model.generate_content(user_text)
+        detected_lang = detect_res.text.strip()
+        
+        updated = False
+        if detected_lang != "中文":
+            # 收到外文：更新偏好外語，並翻譯成中文
+            if session.get("lang") != detected_lang:
+                session["lang"] = detected_lang
+                updated = True
+            prompt = f"請將以下文字翻譯成【台灣常用繁體中文】：\n{user_text}"
+        else:
+            # 收到中文：使用記錄的偏好外語進行翻譯
+            target_lang = session.get("lang", "英文")
+            prompt = f"請將以下文字翻譯成【{target_lang}】：\n{user_text}"
+
+        if updated:
+            user_language_pref[source_id] = session
+            save_preferences(user_language_pref)
+
+        response = translate_model.generate_content(prompt)
+        translated_text = response.text.strip()
+
+        reply(translated_text)
 
     except Exception as e:
         print(f"[Error Details] Failed to handle message: {str(e)}")
