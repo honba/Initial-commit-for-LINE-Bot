@@ -24,7 +24,7 @@ system_instruction = """
 2. 若輸入為外文，翻譯成繁體中文。
 3. 只需輸出翻譯結果，不含任何額外問候或解釋。
 """
-model = genai.GenerativeModel('gemini-1.5-flash', system_instruction=system_instruction)
+model = genai.GenerativeModel('gemini-3.5-flash', system_instruction=system_instruction)
 
 @app.get("/")
 def health_check():
