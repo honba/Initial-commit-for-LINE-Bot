@@ -53,7 +53,7 @@ user_language_pref = load_preferences()
 # ---------------------------------------------------------------------------
 # 語言偵測模型：專門判斷輸入文字的語系
 detect_model = genai.GenerativeModel(
-    'gemini-3-flash-live',
+    'gemini-3.5-flash-lite',
     system_instruction=(
         "你是一個語系辨識專家。請判斷輸入文字主要使用的語言。"
         "如果是中文（繁體或簡體），請僅回應 '中文'；"
@@ -64,7 +64,7 @@ detect_model = genai.GenerativeModel(
 
 # 精準翻譯模型：專門執行高質量的翻譯
 translate_model = genai.GenerativeModel(
-    'gemini-3-flash-live',
+    'gemini-3.5-flash-lite',
     system_instruction=(
         "你是一個精準的專業翻譯員。"
         "只需輸出翻譯結果，絕對不要包含任何額外問候、解釋、引號或標點修飾。"
